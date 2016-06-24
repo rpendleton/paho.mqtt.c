@@ -1322,8 +1322,11 @@ void MQTTAsync_checkTimeouts()
 		
 		MQTTAsyncs* m = (MQTTAsyncs*)(current->content);
 		
+		/* check disconnect timeout */
+		if (m->c->connect_state == -2)
+			MQTTAsync_checkDisconnect(m, &m->disconnect);
 		/* check connect timeout */
-		if (m->c->connect_state != 0 && MQTTAsync_elapsed(m->connect.start_time) > (m->connectTimeout * 1000))
+		else if (m->c->connect_state != 0 && MQTTAsync_elapsed(m->connect.start_time) > (m->connectTimeout * 1000))
 		{
 			if (MQTTAsync_checkConn(&m->connect, m))
 			{
@@ -1355,10 +1358,6 @@ void MQTTAsync_checkTimeouts()
 			}
 			continue;
 		}
-	
-		/* check disconnect timeout */
-		if (m->c->connect_state == -2)
-			MQTTAsync_checkDisconnect(m, &m->disconnect);
 	
 		timed_out_count = 0;
 		/* check response timeouts */
@@ -1689,8 +1688,22 @@ thread_return_type WINAPI MQTTAsync_receiveThread(void* n)
 				MQTTAsync_disconnect_internal(m, 0);
 				MQTTAsync_lock_mutex(mqttasync_mutex);
 			}
-			else /* calling disconnect_internal won't have any effect if we're already disconnected */
+			else
+			{
+				/* calling disconnect_internal won't have any effect if we're already disconnected */
 				MQTTAsync_closeOnly(m->c);
+
+				if (m->shouldBeConnected == 1 && m->connect.onFailure)
+				{
+					MQTTAsync_failureData data;
+
+					data.token = 0;
+					data.code = MQTTASYNC_FAILURE;
+					data.message = "TCP socket error";
+					Log(TRACE_MIN, -1, "Calling connect failure for client %s", m->c->clientID);
+					(*(m->connect.onFailure))(m->connect.context, &data);
+				}
+			}
 		}
 		else
 		{
